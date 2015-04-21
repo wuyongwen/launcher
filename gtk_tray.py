@@ -23,7 +23,7 @@ import module_init
 class Gtk_tray():
     notify_list = []
     def __init__(self):
-        logo_filename = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'python.png')
+        logo_filename = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'web_ui', 'favicon.ico')
 
         self.trayicon = gtk.StatusIcon()
         self.trayicon.set_from_file(logo_filename)
@@ -65,8 +65,8 @@ class Gtk_tray():
         webbrowser.open_new("http://127.0.0.1:8085/")
 
     def on_restart_goagent(self, widget=None, data=None):
-        module_init.stop()
-        module_init.start()
+        module_init.stop("goagent")
+        module_init.start("goagent")
 
     def on_quit(self, widget, data=None):
         gtk.main_quit()

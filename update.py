@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding:utf-8
 
+import os
 import urllib2
 import json
 import time
@@ -10,6 +11,8 @@ import sys
 
 import logging
 import config
+import uuid
+import platform
 
 
 autoproxy = '127.0.0.1:8087'
@@ -77,7 +80,7 @@ def install_module(module, new_version):
         return
 
 
-    config.config["modules"][module]["current_version"] = str(new_version)
+    config.set(["modules", module, "current_version"], str(new_version))
     config.save()
 
     if module == "launcher":
@@ -106,14 +109,20 @@ def install_module(module, new_version):
 def download_module(module, new_version):
     import os
     global update_content, update_dict
+
+    current_path = os.path.dirname(os.path.abspath(__file__))
+    download_path = os.path.abspath( os.path.join(current_path, os.pardir, os.pardir, 'data', 'downloads'))
+    if not os.path.isdir(download_path):
+        os.mkdir(download_path)
+
     try:
         for source in update_dict["modules"][module]["versions"][new_version]["sources"]:
             url = source["url"]
             filename = module + "-" + new_version + ".zip"
 
 
-            current_path = os.path.dirname(os.path.abspath(__file__))
-            file_path = os.path.abspath( os.path.join(current_path, os.pardir, os.pardir, 'data', 'downloads', filename))
+
+            file_path = os.path.join(download_path, filename)
 
             if os.path.isfile(file_path) and sha1_file(file_path) == update_dict["modules"][module]["versions"][new_version]["sha1"]:
                 pass
@@ -158,6 +167,13 @@ def download_module(module, new_version):
                     install_module(module, new_version)
                 else:
                     ignore_module(module, new_version)
+            elif sys.platform == "darwin":
+                from  mac_tray import sys_tray
+                if sys_tray.dialog_yes_no(msg, u"Install", None, None) == 1:
+                    install_module(module, new_version)
+                else:
+                    ignore_module(module, new_version)
+
             else:
                 install_module(module, new_version)
 
@@ -167,7 +183,7 @@ def download_module(module, new_version):
         logging.warn("get goagent source fail, content:%s err:%s", update_content, e)
 
 def ignore_module(module, new_version):
-    config.config["modules"][module]["ignore_version"] = str(new_version)
+    config.set(["modules", module, "ignore_version"], str(new_version))
     config.save()
 
 def general_gtk_callback(widget=None, data=None):
@@ -193,7 +209,7 @@ def check_update():
     global update_content, update_dict
     try:
         #config.load()
-        if not config.config["update"]["check_update"]:
+        if not config.get(["update", "check_update"], 1):
             return
 
         req_url = update_url + "?uuid=" + get_uuid()
@@ -213,7 +229,7 @@ def check_update():
                 config.config["modules"][module] = {}
                 config.config["modules"][module]["current_version"] = '0.0.0'
             else:
-                current_version = config.config["modules"][module]["current_version"]
+                current_version = config.get(["modules", module, "current_version"])
                 if "ignore_version" in config.config["modules"][module]:
                     ignore_version = config.config["modules"][module]["ignore_version"]
                 else:
@@ -241,11 +257,19 @@ def check_update():
                         download_module(module, new_version)
                     else:
                         ignore_module(module, new_version)
+                elif sys.platform == "darwin":
+                    from mac_tray import sys_tray
+                    msg = "Module %s new version: %s, Download?" % (module,  new_version)
+                    if sys_tray.dialog_yes_no(msg, u"Download", None, None) == 1:
+                        download_module(module, new_version)
+                    else:
+                        ignore_module(module, new_version)
+
                 else:
                     download_module(module, new_version)
 
     except Exception as e:
-        logging.warn("check_update except:%s", e)
+        logging.exception("check_update except:%s", e)
         return
 
 def create_desktop_shortcut():
@@ -262,28 +286,25 @@ def create_desktop_shortcut():
         #    return
 
         import subprocess
-        p = subprocess.call(["Wscript.exe", "create_shortcut.js"], shell=False)
+        p = subprocess.call(["Wscript.exe", "//E:JScript", "create_shortcut.js"], shell=False)
 
 def notify_install_tcpz_for_winXp():
     import ctypes
     ctypes.windll.user32.MessageBoxW(None, u"请使用tcp-z对 tcpip.sys 打补丁，解决链接并发限制！", u"Patch XP needed", 0)
 
 def check_new_machine():
-    import os
+
     current_path = os.path.dirname(os.path.abspath(__file__))
-    import uuid
-    node_id = uuid.getnode()
-    if current_path != config.config["update"]["last_path"] or node_id != config.config["update"]["node_id"]:
-        config.config["update"]["last_path"] = current_path
+    if current_path != config.get(["update", "last_path"], ""):
+        config.set(["update", "last_path"], current_path)
         config.save()
-        get_uuid() # update node_id and uuid
 
-        create_desktop_shortcut()
-
-        import sys
-        import platform
         if sys.platform == "win32" and platform.release() == "XP":
             notify_install_tcpz_for_winXp()
+
+        logging.info("generate desktop shortcut")
+        create_desktop_shortcut()
+
 
 
 def check_loop():
@@ -291,7 +312,7 @@ def check_loop():
 
     #wait goagent to start
     #update need goagent as proxy
-    time.sleep(10)
+    time.sleep(1)
 
     while True:
         check_update()
@@ -302,21 +323,26 @@ def start():
     p.setDaemon(True)
     p.start()
 
+def need_new_uuid():
+    if not config.get(["update", "uuid"]):
+        logging.info("need_new_uuid: uuid is empty")
+        return True
+    return False
+
+def generate_new_uuid():
+    xx_net_uuid = str(uuid.uuid4())
+    config.set(["update", "uuid"], xx_net_uuid)
+    logging.info("generate uuid:%s", xx_net_uuid)
+    config.save()
 
 
 def get_uuid():
-    import uuid
-    node_id = uuid.getnode()
+    if need_new_uuid():
+        generate_new_uuid()
 
-    #config.load()
-    if node_id != config.config["update"]["node_id"] or config.config["update"]["uuid"] == '':
-        uuid = str(uuid.uuid4())
-        config.config["update"]["node_id"] = node_id
-        config.config["update"]["uuid"] = uuid
-        config.save()
-    else:
-        uuid = config.config["update"]["uuid"]
-    return uuid
+    xx_net_uuid = config.get(["update", "uuid"])
+    logging.info("get uuid:%s", xx_net_uuid)
+    return xx_net_uuid
 
 if __name__ == "__main__":
     #get_uuid()

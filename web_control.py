@@ -87,6 +87,15 @@ class Http_Handler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        try:
+            refer = self.headers.getheader('Referer')
+            netloc = urlparse.urlparse(refer).netloc
+            if not netloc.startswith("127.0.0.1") and not netloc.startswitch("localhost"):
+                logging.warn("web control ref:%s refuse", netloc)
+                return
+        except:
+            pass
+        
         logging.debug ('launcher web_control %s "%s %s ', self.address_string(), self.command, self.path)
         # check for '..', which will leak file
         if re.search(r'(\.{2})', self.path) is not None:
@@ -204,7 +213,7 @@ class Http_Handler(BaseHTTPServer.BaseHTTPRequestHandler):
                 if check_update != 0 and check_update != 1:
                     data = '{"res":"fail, check_update:%s"}' % check_update
                 else:
-                    config.config["update"]["check_update"] = int(check_update)
+                    config.set(["update", "check_update"], int(check_update))
                     config.save()
 
                     data = '{"res":"success"}'
@@ -296,9 +305,34 @@ def http_request(url, method="GET"):
 
 def confirm_xxnet_exit():
     for i in range(10):
+        if http_request("http://127.0.0.1:8084/quit") == False:
+            break
+        time.sleep(1)
+    for i in range(10):
         if http_request("http://127.0.0.1:8085/quit") == False:
             return True
         time.sleep(1)
+    return False
+
+def confirm_module_ready(port):
+    if port == 0:
+        logging.error("confirm_module_ready with port 0")
+        time.sleep(1)
+        return False
+
+    for i in range(200):
+        req = http_request("http://127.0.0.1:%d/is_ready" % port)
+        if req == False:
+            time.sleep(1)
+            continue
+
+        content = req.read(1024)
+        req.close()
+        #logging.debug("cert_import_ready return:%s", content)
+        if content == "True":
+            return True
+        else:
+            time.sleep(1)
     return False
 
 if __name__ == "__main__":
